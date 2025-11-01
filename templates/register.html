@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>Register</h3>
+<form method="POST">
+  <input class="form-control my-2" name="username" placeholder="Username" required>
+  <input class="form-control my-2" type="email" name="email" placeholder="Email" required>
+  <input class="form-control my-2" type="password" name="password" placeholder="Password" required>
+  <button class="btn btn-primary">Signup</button>
+</form>
+{% endblock %}

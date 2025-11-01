@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>Upload New Solution</h3>
+<form method="POST" enctype="multipart/form-data">
+  <input class="form-control my-2" name="problem_no" placeholder="Problem No" required>
+  <input class="form-control my-2" name="title" placeholder="Title" required>
+  <textarea class="form-control my-2" name="code" rows="8" placeholder="Code here..." required></textarea>
+  <textarea class="form-control my-2" name="notes" placeholder="Additional notes"></textarea>
+  <input class="form-control my-2" type="file" name="image">
+  <button class="btn btn-success">Post</button>
+</form>
+{% endblock %}

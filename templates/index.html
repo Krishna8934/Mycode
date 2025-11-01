@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>All Solutions</h3>
+<ul class="list-group">
+  {% for p in posts %}
+  <li class="list-group-item">
+    <a href="{{ url_for('post', post_id=p['id']) }}">
+      <strong>#{{p['problem_no']}} - {{p['title']}}</strong>
+    </a>
+    <div>By <em>{{p['username']}}</em> on {{p['date']}}</div>
+  </li>
+  {% else %}
+  <p>No posts yet.</p>
+  {% endfor %}
+</ul>
+{% endblock %}

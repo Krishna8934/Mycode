@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>#{{post['problem_no']}} - {{post['title']}}</h3>
+<p><em>By {{post['username']}} on {{post['date']}}</em></p>
+{% if post['image'] %}
+<img src="{{ url_for('static', filename='uploads/' + post['image']) }}" width="400">
+{% endif %}
+<pre class="bg-light p-2 mt-3"><code>{{ post['code'] }}</code></pre>
+{% if post['notes'] %}
+<p><strong>Notes:</strong> {{post['notes']}}</p>
+{% endif %}
+<p><strong>Share Link:</strong> <a href="{{ request.url }}">{{ request.url }}</a></p>
+{% endblock %}
+
+
