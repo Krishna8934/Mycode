@@ -1,16 +1,28 @@
 {% extends 'base.html' %}
 {% block content %}
 <h3>All Solutions</h3>
+
+<!-- 🔍 Search Bar -->
+<form method="get" action="{{ url_for('index') }}" class="mb-3 d-flex">
+  <input type="text" name="q" class="form-control me-2" 
+         placeholder="Search by username, title, problem no, or notes..."
+         value="{{ request.args.get('q', '') }}">
+  <button class="btn btn-primary" type="submit">Search</button>
+</form>
+
+<!-- 🔽 Results Section -->
 <ul class="list-group">
-  {% for p in posts %}
-  <li class="list-group-item">
-    <a href="{{ url_for('post', post_id=p['id']) }}">
-      <strong>#{{p['problem_no']}} - {{p['title']}}</strong>
-    </a>
-    <div>By <em>{{p['username']}}</em> on {{p['date']}}</div>
-  </li>
+  {% if posts %}
+    {% for p in posts %}
+      <li class="list-group-item">
+        <a href="{{ url_for('post', post_id=p['id']) }}">
+          <strong>#{{ p['problem_no'] }} - {{ p['title'] }}</strong>
+        </a>
+        <div>By <em>{{ p['username'] }}</em> on {{ p['date'] }}</div>
+      </li>
+    {% endfor %}
   {% else %}
-  <p>No posts yet.</p>
-  {% endfor %}
+    <p class="text-muted">No posts found matching your search.</p>
+  {% endif %}
 </ul>
 {% endblock %}

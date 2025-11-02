@@ -42,11 +42,27 @@ def init_db():
     print("✅ Database initialized.")
 
 # ---------- ROUTES ----------
-
 @app.route('/')
 def index():
+    q = request.args.get('q', '').strip()
     conn = get_db()
-    posts = conn.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY id DESC').fetchall()
+    if q:
+        query = '''
+            SELECT posts.*, users.username
+            FROM posts
+            JOIN users ON posts.user_id = users.id
+            WHERE users.username LIKE ? 
+               OR posts.title LIKE ? 
+               OR posts.notes LIKE ? 
+               OR posts.problem_no LIKE ?
+            ORDER BY posts.id DESC
+        '''
+        search_term = f'%{q}%'
+        posts = conn.execute(query, (search_term, search_term, search_term, search_term)).fetchall()
+    else:
+        posts = conn.execute(
+            'SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY id DESC'
+        ).fetchall()
     return render_template('index.html', posts=posts)
 
 @app.route('/register', methods=['GET','POST'])
