@@ -11,6 +11,7 @@ app = Flask(__name__)
 app.secret_key = 'supersecretkey'
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
+
 # ---------- DATABASE SETUP ----------
 def get_db():
     conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
@@ -22,7 +23,6 @@ def init_db():
     try:
         conn = get_db()
         cur = conn.cursor()
-
         cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -31,7 +31,6 @@ def init_db():
             password TEXT NOT NULL
         );
         ''')
-
         cur.execute('''
         CREATE TABLE IF NOT EXISTS posts (
             id SERIAL PRIMARY KEY,
@@ -44,7 +43,6 @@ def init_db():
             date TEXT
         );
         ''')
-
         conn.commit()
         cur.close()
         conn.close()
@@ -53,10 +51,10 @@ def init_db():
         print("❌ Database initialization failed:", e)
 
 
-@app.before_first_request
-def setup_database():
-    """Run once when app starts on Render"""
+# Run init_db() once when app starts (Flask 3.1 fix)
+with app.app_context():
     init_db()
+
 
 
 # ---------- ROUTES ----------
