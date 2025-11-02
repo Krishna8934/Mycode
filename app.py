@@ -165,6 +165,8 @@ def delete_post(post_id):
 
 # ---------- MAIN ----------
 if __name__ == '__main__':
-    if not os.path.exists('database.db'):
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.db')
+    if not os.path.exists(db_path):
         init_db()
     app.run(debug=True)
+
