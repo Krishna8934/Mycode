@@ -1,7 +1,7 @@
 import os
 import psycopg2
 import psycopg2.extras
-from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -13,39 +13,50 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
 # ---------- DATABASE SETUP ----------
 def get_db():
-    # Render ke environment variable se connect hoga
     conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     return conn
 
-def init_db():
-    conn = get_db()
-    cur = conn.cursor()
 
-    # Create tables if they don't exist
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
-    );
-    ''')
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS posts (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        problem_no TEXT,
-        title TEXT,
-        code TEXT,
-        image TEXT,
-        notes TEXT,
-        date TEXT
-    );
-    ''')
-    conn.commit()
-    cur.close()
-    conn.close()
-    print("✅ PostgreSQL database initialized.")
+def init_db():
+    """Create tables if they do not exist"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        );
+        ''')
+
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS posts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            problem_no TEXT,
+            title TEXT,
+            code TEXT,
+            image TEXT,
+            notes TEXT,
+            date TEXT
+        );
+        ''')
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ PostgreSQL tables created or already exist.")
+    except Exception as e:
+        print("❌ Database initialization failed:", e)
+
+
+@app.before_first_request
+def setup_database():
+    """Run once when app starts on Render"""
+    init_db()
 
 
 # ---------- ROUTES ----------
@@ -75,22 +86,24 @@ def index():
             JOIN users ON posts.user_id = users.id 
             ORDER BY posts.id DESC;
         ''')
+
     posts = cur.fetchall()
     cur.close()
     conn.close()
     return render_template('index.html', posts=posts)
 
 
-@app.route('/register', methods=['GET','POST'])
+@app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = request.form['username']
         email = request.form['email']
         password = generate_password_hash(request.form['password'])
+
         try:
             conn = get_db()
             cur = conn.cursor()
-            cur.execute('INSERT INTO users (username, email, password) VALUES (%s, %s, %s)', 
+            cur.execute('INSERT INTO users (username, email, password) VALUES (%s, %s, %s)',
                         (username, email, password))
             conn.commit()
             cur.close()
@@ -100,14 +113,16 @@ def register():
         except Exception as e:
             print(e)
             flash('Email already exists or error occurred.', 'danger')
+
     return render_template('register.html')
 
 
-@app.route('/login', methods=['GET','POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
+
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute('SELECT * FROM users WHERE email = %s', (email,))
@@ -124,6 +139,7 @@ def login():
             return redirect(url_for('index'))
         else:
             flash('Invalid credentials', 'danger')
+
     return render_template('login.html')
 
 
@@ -134,7 +150,7 @@ def logout():
     return redirect(url_for('index'))
 
 
-@app.route('/upload', methods=['GET','POST'])
+@app.route('/upload', methods=['GET', 'POST'])
 def upload():
     if 'user_id' not in session:
         flash('Please login first.', 'warning')
@@ -147,11 +163,13 @@ def upload():
         notes = request.form['notes']
         file = request.files['image']
         filename = None
+
         if file and file.filename:
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
         date = datetime.now().strftime("%Y-%m-%d %H:%M")
+
         conn = get_db()
         cur = conn.cursor()
         cur.execute('''
@@ -164,6 +182,7 @@ def upload():
 
         flash('Post uploaded successfully!', 'success')
         return redirect(url_for('index'))
+
     return render_template('upload.html')
 
 
@@ -184,6 +203,7 @@ def post(post_id):
     if not post:
         flash('Post not found', 'danger')
         return redirect(url_for('index'))
+
     return render_template('post.html', post=post)
 
 
@@ -221,5 +241,4 @@ def delete_post(post_id):
 
 # ---------- MAIN ----------
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True)
