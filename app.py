@@ -1,5 +1,6 @@
 import os
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -12,58 +13,73 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
 # ---------- DATABASE SETUP ----------
 def get_db():
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
+    # Render ke environment variable se connect hoga
+    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     return conn
 
 def init_db():
-    with get_db() as conn:
-        conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-        ''')
-        conn.execute('''
-        CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            problem_no TEXT,
-            title TEXT,
-            code TEXT,
-            image TEXT,
-            notes TEXT,
-            date TEXT,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-        ''')
-    print("✅ Database initialized.")
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Create tables if they don't exist
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL
+    );
+    ''')
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS posts (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        problem_no TEXT,
+        title TEXT,
+        code TEXT,
+        image TEXT,
+        notes TEXT,
+        date TEXT
+    );
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("✅ PostgreSQL database initialized.")
+
 
 # ---------- ROUTES ----------
 @app.route('/')
 def index():
     q = request.args.get('q', '').strip()
     conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
     if q:
         query = '''
             SELECT posts.*, users.username
             FROM posts
             JOIN users ON posts.user_id = users.id
-            WHERE users.username LIKE ? 
-               OR posts.title LIKE ? 
-               OR posts.notes LIKE ? 
-               OR posts.problem_no LIKE ?
-            ORDER BY posts.id DESC
+            WHERE users.username ILIKE %s
+               OR posts.title ILIKE %s
+               OR posts.notes ILIKE %s
+               OR posts.problem_no ILIKE %s
+            ORDER BY posts.id DESC;
         '''
         search_term = f'%{q}%'
-        posts = conn.execute(query, (search_term, search_term, search_term, search_term)).fetchall()
+        cur.execute(query, (search_term, search_term, search_term, search_term))
     else:
-        posts = conn.execute(
-            'SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY id DESC'
-        ).fetchall()
+        cur.execute('''
+            SELECT posts.*, users.username 
+            FROM posts 
+            JOIN users ON posts.user_id = users.id 
+            ORDER BY posts.id DESC;
+        ''')
+    posts = cur.fetchall()
+    cur.close()
+    conn.close()
     return render_template('index.html', posts=posts)
+
 
 @app.route('/register', methods=['GET','POST'])
 def register():
@@ -73,13 +89,19 @@ def register():
         password = generate_password_hash(request.form['password'])
         try:
             conn = get_db()
-            conn.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', (username, email, password))
+            cur = conn.cursor()
+            cur.execute('INSERT INTO users (username, email, password) VALUES (%s, %s, %s)', 
+                        (username, email, password))
             conn.commit()
+            cur.close()
+            conn.close()
             flash('Account created! Please login.', 'success')
             return redirect(url_for('login'))
-        except Exception:
+        except Exception as e:
+            print(e)
             flash('Email already exists or error occurred.', 'danger')
     return render_template('register.html')
+
 
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -87,7 +109,11 @@ def login():
         email = request.form['email']
         password = request.form['password']
         conn = get_db()
-        user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute('SELECT * FROM users WHERE email = %s', (email,))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
 
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
@@ -100,11 +126,13 @@ def login():
             flash('Invalid credentials', 'danger')
     return render_template('login.html')
 
+
 @app.route('/logout')
 def logout():
     session.clear()
     flash('Logged out successfully.', 'info')
     return redirect(url_for('index'))
+
 
 @app.route('/upload', methods=['GET','POST'])
 def upload():
@@ -122,25 +150,43 @@ def upload():
         if file and file.filename:
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
         date = datetime.now().strftime("%Y-%m-%d %H:%M")
         conn = get_db()
-        conn.execute('INSERT INTO posts (user_id, problem_no, title, code, image, notes, date) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                     (session['user_id'], problem_no, title, code, filename, notes, date))
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO posts (user_id, problem_no, title, code, image, notes, date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (session['user_id'], problem_no, title, code, filename, notes, date))
         conn.commit()
+        cur.close()
+        conn.close()
+
         flash('Post uploaded successfully!', 'success')
         return redirect(url_for('index'))
     return render_template('upload.html')
 
+
 @app.route('/p/<int:post_id>')
 def post(post_id):
     conn = get_db()
-    post = conn.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id WHERE posts.id = ?', (post_id,)).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute('''
+        SELECT posts.*, users.username 
+        FROM posts 
+        JOIN users ON posts.user_id = users.id 
+        WHERE posts.id = %s
+    ''', (post_id,))
+    post = cur.fetchone()
+    cur.close()
+    conn.close()
+
     if not post:
         flash('Post not found', 'danger')
         return redirect(url_for('index'))
     return render_template('post.html', post=post)
 
-# ---------- DELETE POST ROUTE ----------
+
 @app.route('/delete/<int:post_id>', methods=['POST'])
 def delete_post(post_id):
     if 'user_id' not in session:
@@ -148,25 +194,32 @@ def delete_post(post_id):
         return redirect(url_for('login'))
 
     conn = get_db()
-    post = conn.execute('SELECT * FROM posts WHERE id = ?', (post_id,)).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute('SELECT * FROM posts WHERE id = %s', (post_id,))
+    post = cur.fetchone()
 
     if not post:
         flash('Post not found.', 'danger')
+        cur.close()
+        conn.close()
         return redirect(url_for('index'))
 
     if post['user_id'] != session['user_id']:
         flash('You are not authorized to delete this post.', 'danger')
+        cur.close()
+        conn.close()
         return redirect(url_for('index'))
 
-    conn.execute('DELETE FROM posts WHERE id = ?', (post_id,))
+    cur.execute('DELETE FROM posts WHERE id = %s', (post_id,))
     conn.commit()
+    cur.close()
+    conn.close()
+
     flash('Post deleted successfully!', 'info')
     return redirect(url_for('index'))
 
+
 # ---------- MAIN ----------
 if __name__ == '__main__':
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.db')
-    if not os.path.exists(db_path):
-        init_db()
+    init_db()
     app.run(debug=True)
-

@@ -5,3 +5,4 @@ itsdangerous
 click
 pillow
 gunicorn
+psycopg2-binary
