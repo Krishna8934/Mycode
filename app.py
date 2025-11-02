@@ -1,9 +1,10 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime
+import secrets
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
@@ -56,12 +57,11 @@ def register():
         password = generate_password_hash(request.form['password'])
         try:
             conn = get_db()
-            conn.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-                         (username, email, password))
+            conn.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', (username, email, password))
             conn.commit()
             flash('Account created! Please login.', 'success')
             return redirect(url_for('login'))
-        except Exception as e:
+        except Exception:
             flash('Email already exists or error occurred.', 'danger')
     return render_template('register.html')
 
@@ -72,9 +72,12 @@ def login():
         password = request.form['password']
         conn = get_db()
         user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
+            session['csrf_token'] = secrets.token_hex(16)
+            session['is_admin'] = 0
             flash('Logged in successfully!', 'success')
             return redirect(url_for('index'))
         else:
@@ -120,6 +123,29 @@ def post(post_id):
         flash('Post not found', 'danger')
         return redirect(url_for('index'))
     return render_template('post.html', post=post)
+
+# ---------- DELETE POST ROUTE ----------
+@app.route('/delete/<int:post_id>', methods=['POST'])
+def delete_post(post_id):
+    if 'user_id' not in session:
+        flash('Please login first.', 'warning')
+        return redirect(url_for('login'))
+
+    conn = get_db()
+    post = conn.execute('SELECT * FROM posts WHERE id = ?', (post_id,)).fetchone()
+
+    if not post:
+        flash('Post not found.', 'danger')
+        return redirect(url_for('index'))
+
+    if post['user_id'] != session['user_id']:
+        flash('You are not authorized to delete this post.', 'danger')
+        return redirect(url_for('index'))
+
+    conn.execute('DELETE FROM posts WHERE id = ?', (post_id,))
+    conn.commit()
+    flash('Post deleted successfully!', 'info')
+    return redirect(url_for('index'))
 
 # ---------- MAIN ----------
 if __name__ == '__main__':
