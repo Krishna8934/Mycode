@@ -2,6 +2,8 @@ import os
 import sqlite3
 import psycopg2
 import psycopg2.extras
+import cloudinary
+import cloudinary.uploader
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -10,7 +12,14 @@ import secrets
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
+
+
+# ---------------- CLOUDINARY CONFIG ----------------
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+)
 
 
 # ---------------- DATABASE SETUP ----------------
@@ -21,11 +30,9 @@ def using_postgres():
 
 def get_db():
     if using_postgres():
-        # running on Render → PostgreSQL
         conn = psycopg2.connect(os.environ["DATABASE_URL"], sslmode="require")
         return conn
     else:
-        # running locally → SQLite
         conn = sqlite3.connect("database.db")
         conn.row_factory = sqlite3.Row
         return conn
@@ -34,10 +41,8 @@ def get_db():
 def init_db():
     try:
         if using_postgres():
-            # PostgreSQL tables
             conn = get_db()
             cur = conn.cursor()
-
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -46,7 +51,6 @@ def init_db():
                     password TEXT NOT NULL
                 );
             """)
-
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS posts (
                     id SERIAL PRIMARY KEY,
@@ -59,16 +63,12 @@ def init_db():
                     date TEXT
                 );
             """)
-
             conn.commit()
             cur.close()
             conn.close()
             print("✅ PostgreSQL tables ready.")
-
         else:
-            # SQLite tables
             conn = sqlite3.connect("database.db")
-
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +77,6 @@ def init_db():
                     password TEXT NOT NULL
                 )
             """)
-
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS posts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +90,6 @@ def init_db():
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 )
             """)
-
             conn.commit()
             conn.close()
             print("✅ SQLite tables ready.")
@@ -111,42 +109,36 @@ def index():
     q = request.args.get('q', '').strip()
     conn = get_db()
 
-    if using_postgres():
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    else:
-        cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if using_postgres() else conn.cursor()
 
     if q:
         search_term = f"%{q}%"
         if using_postgres():
-            cur.execute('''
+            cur.execute("""
                 SELECT posts.*, users.username
-                FROM posts
-                JOIN users ON posts.user_id = users.id
+                FROM posts JOIN users ON posts.user_id = users.id
                 WHERE users.username ILIKE %s
-                   OR posts.title ILIKE %s
-                   OR posts.notes ILIKE %s
-                   OR posts.problem_no ILIKE %s
+                OR posts.title ILIKE %s
+                OR posts.notes ILIKE %s
+                OR posts.problem_no ILIKE %s
                 ORDER BY posts.id DESC
-            ''', (search_term, search_term, search_term, search_term))
+            """, (search_term, search_term, search_term, search_term))
         else:
-            cur.execute('''
+            cur.execute("""
                 SELECT posts.*, users.username
-                FROM posts
-                JOIN users ON posts.user_id = users.id
+                FROM posts JOIN users ON posts.user_id = users.id
                 WHERE users.username LIKE ?
-                   OR posts.title LIKE ?
-                   OR posts.notes LIKE ?
-                   OR posts.problem_no LIKE ?
+                OR posts.title LIKE ?
+                OR posts.notes LIKE ?
+                OR posts.problem_no LIKE ?
                 ORDER BY posts.id DESC
-            ''', (search_term, search_term, search_term, search_term))
+            """, (search_term, search_term, search_term, search_term))
     else:
-        cur.execute('''
+        cur.execute("""
             SELECT posts.*, users.username
-            FROM posts
-            JOIN users ON posts.user_id = users.id
+            FROM posts JOIN users ON posts.user_id = users.id
             ORDER BY posts.id DESC
-        ''')
+        """)
 
     posts = cur.fetchall()
     cur.close()
@@ -190,12 +182,10 @@ def login():
         password = request.form['password']
 
         conn = get_db()
-        if using_postgres():
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT * FROM users WHERE email = %s", (email,))
-        else:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM users WHERE email = ?", (email,))
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if using_postgres() else conn.cursor()
+
+        query = "SELECT * FROM users WHERE email = %s" if using_postgres() else "SELECT * FROM users WHERE email = ?"
+        cur.execute(query, (email,))
 
         user = cur.fetchone()
         cur.close()
@@ -206,8 +196,8 @@ def login():
             session['username'] = user['username']
             flash("Logged in successfully!", "success")
             return redirect(url_for('index'))
-        else:
-            flash("Invalid credentials", "danger")
+
+        flash("Invalid credentials", "danger")
 
     return render_template('login.html')
 
@@ -232,15 +222,18 @@ def upload():
         notes = request.form['notes']
         file = request.files['image']
 
-        filename = None
+        image_url = None
+
+        # ---------------- CLOUDINARY UPLOAD ----------------
         if file and file.filename:
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            upload_result = cloudinary.uploader.upload(file)
+            image_url = upload_result.get("secure_url")
 
         date = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         conn = get_db()
         cur = conn.cursor()
+
         query = """
             INSERT INTO posts (user_id, problem_no, title, code, image, notes, date)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -249,10 +242,8 @@ def upload():
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
 
-        cur.execute(query, (session['user_id'], problem_no, title, code, filename, notes, date))
+        cur.execute(query, (session['user_id'], problem_no, title, code, image_url, notes, date))
         conn.commit()
-        cur.close()
-        conn.close()
 
         flash("Post uploaded successfully!", "success")
         return redirect(url_for('index'))
@@ -263,26 +254,20 @@ def upload():
 @app.route('/p/<int:post_id>')
 def post(post_id):
     conn = get_db()
-    if using_postgres():
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
-            SELECT posts.*, users.username
-            FROM posts 
-            JOIN users ON posts.user_id = users.id
-            WHERE posts.id = %s
-        """, (post_id,))
-    else:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT posts.*, users.username
-            FROM posts 
-            JOIN users ON posts.user_id = users.id
-            WHERE posts.id = ?
-        """, (post_id,))
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if using_postgres() else conn.cursor()
 
+    query = """
+        SELECT posts.*, users.username
+        FROM posts JOIN users ON posts.user_id = users.id
+        WHERE posts.id = %s
+    """ if using_postgres() else """
+        SELECT posts.*, users.username
+        FROM posts JOIN users ON posts.user_id = users.id
+        WHERE posts.id = ?
+    """
+
+    cur.execute(query, (post_id,))
     post = cur.fetchone()
-    cur.close()
-    conn.close()
 
     if not post:
         flash("Post not found", "danger")
@@ -298,33 +283,28 @@ def delete_post(post_id):
         return redirect(url_for('login'))
 
     conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if using_postgres() else conn.cursor()
 
-    if using_postgres():
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT * FROM posts WHERE id = %s", (post_id,))
-    else:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM posts WHERE id = ?", (post_id,))
-
+    query = "SELECT * FROM posts WHERE id = %s" if using_postgres() else "SELECT * FROM posts WHERE id = ?"
+    cur.execute(query, (post_id,))
     post = cur.fetchone()
 
     if not post:
-        flash("Post not found.", "danger")
+        flash("Post not found", "danger")
         return redirect(url_for('index'))
 
     if post['user_id'] != session['user_id']:
-        flash("You are not authorized to delete this post.", "danger")
+        flash("Not authorized.", "danger")
         return redirect(url_for('index'))
 
-    query = "DELETE FROM posts WHERE id = %s" if using_postgres() else "DELETE FROM posts WHERE id = ?"
-    cur.execute(query, (post_id,))
+    delete_query = "DELETE FROM posts WHERE id = %s" if using_postgres() else "DELETE FROM posts WHERE id = ?"
+    cur.execute(delete_query, (post_id,))
     conn.commit()
 
     flash("Post deleted.", "info")
     return redirect(url_for('index'))
 
 
-# ---------------- MAIN ----------------
-
+# --------------- MAIN ----------------
 if __name__ == '__main__':
     app.run(debug=True)
