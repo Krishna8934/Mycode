@@ -6,3 +6,4 @@ click
 pillow
 gunicorn
 psycopg2-binary
+cloudinary
