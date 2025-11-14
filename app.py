@@ -1,14 +1,16 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 import sqlite3
 import psycopg2
 import psycopg2.extras
 import cloudinary
 import cloudinary.uploader
+
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
 from datetime import datetime
-import secrets
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
@@ -43,6 +45,7 @@ def init_db():
         if using_postgres():
             conn = get_db()
             cur = conn.cursor()
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -51,6 +54,7 @@ def init_db():
                     password TEXT NOT NULL
                 );
             """)
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS posts (
                     id SERIAL PRIMARY KEY,
@@ -63,12 +67,15 @@ def init_db():
                     date TEXT
                 );
             """)
+
             conn.commit()
             cur.close()
             conn.close()
             print("✅ PostgreSQL tables ready.")
+
         else:
             conn = sqlite3.connect("database.db")
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,6 +84,7 @@ def init_db():
                     password TEXT NOT NULL
                 )
             """)
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS posts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,6 +98,7 @@ def init_db():
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 )
             """)
+
             conn.commit()
             conn.close()
             print("✅ SQLite tables ready.")
@@ -113,26 +122,26 @@ def index():
 
     if q:
         search_term = f"%{q}%"
-        if using_postgres():
-            cur.execute("""
-                SELECT posts.*, users.username
-                FROM posts JOIN users ON posts.user_id = users.id
-                WHERE users.username ILIKE %s
-                OR posts.title ILIKE %s
-                OR posts.notes ILIKE %s
-                OR posts.problem_no ILIKE %s
-                ORDER BY posts.id DESC
-            """, (search_term, search_term, search_term, search_term))
-        else:
-            cur.execute("""
-                SELECT posts.*, users.username
-                FROM posts JOIN users ON posts.user_id = users.id
-                WHERE users.username LIKE ?
-                OR posts.title LIKE ?
-                OR posts.notes LIKE ?
-                OR posts.problem_no LIKE ?
-                ORDER BY posts.id DESC
-            """, (search_term, search_term, search_term, search_term))
+        query = """
+            SELECT posts.*, users.username
+            FROM posts JOIN users ON posts.user_id = users.id
+            WHERE users.username ILIKE %s
+            OR posts.title ILIKE %s
+            OR posts.notes ILIKE %s
+            OR posts.problem_no ILIKE %s
+            ORDER BY posts.id DESC
+        """ if using_postgres() else """
+            SELECT posts.*, users.username
+            FROM posts JOIN users ON posts.user_id = users.id
+            WHERE users.username LIKE ?
+            OR posts.title LIKE ?
+            OR posts.notes LIKE ?
+            OR posts.problem_no LIKE ?
+            ORDER BY posts.id DESC
+        """
+
+        cur.execute(query, (search_term, search_term, search_term, search_term))
+
     else:
         cur.execute("""
             SELECT posts.*, users.username
@@ -148,7 +157,7 @@ def index():
 
 @app.route('/register', methods=['GET','POST'])
 def register():
-    if request.method == 'POST':
+    if request.method == 'POST':   # FIXED
         username = request.form['username']
         email = request.form['email']
         password = generate_password_hash(request.form['password'])
@@ -158,21 +167,21 @@ def register():
             cur = conn.cursor()
 
             query = "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)" \
-                if using_postgres() else \
-                "INSERT INTO users (username, email, password) VALUES (?, ?, ?)"
+                    if using_postgres() else \
+                    "INSERT INTO users (username, email, password) VALUES (?, ?, ?)"
 
             cur.execute(query, (username, email, password))
             conn.commit()
-            cur.close()
-            conn.close()
-
             flash("Account created! Please login.", "success")
-            return redirect(url_for('login'))
+
         except Exception as e:
             print(e)
             flash("Email already exists or error occurred.", "danger")
 
+        return redirect(url_for('login'))
+
     return render_template('register.html')
+
 
 
 @app.route('/login', methods=['GET','POST'])
@@ -188,8 +197,6 @@ def login():
         cur.execute(query, (email,))
 
         user = cur.fetchone()
-        cur.close()
-        conn.close()
 
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
@@ -224,9 +231,15 @@ def upload():
 
         image_url = None
 
-        # ---------------- CLOUDINARY UPLOAD ----------------
+        # ----------- CLOUDINARY UPLOAD WITH LOCAL/PROD SEPARATION ------------
         if file and file.filename:
-            upload_result = cloudinary.uploader.upload(file)
+            folder_name = "prod_uploads" if using_postgres() else "local_uploads"
+
+            upload_result = cloudinary.uploader.upload(
+                file,
+                folder=folder_name
+            )
+
             image_url = upload_result.get("secure_url")
 
         date = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -290,7 +303,7 @@ def delete_post(post_id):
     post = cur.fetchone()
 
     if not post:
-        flash("Post not found", "danger")
+        flash("Post not found.", "danger")
         return redirect(url_for('index'))
 
     if post['user_id'] != session['user_id']:
