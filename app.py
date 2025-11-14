@@ -303,6 +303,11 @@ def post(post_id):
 
     return render_template('post.html', post=post)
 
+@app.post("/toggle-theme")
+def toggle_theme():
+    current = session.get("theme", "light")
+    session["theme"] = "dark" if current == "light" else "light"
+    return ("", 204)
 
 
 @app.route('/delete/<int:post_id>', methods=['POST'])
