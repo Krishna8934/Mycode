@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<h3>Edit Post</h3>
+
+<form method="POST" enctype="multipart/form-data">
+
+  <input class="form-control my-2" name="problem_no" value="{{ post['problem_no'] }}" required>
+  
+  <input class="form-control my-2" name="title" value="{{ post['title'] }}" required>
+
+  <textarea class="form-control my-2" name="code" rows="8" required>{{ post['code'] }}</textarea>
+
+  <textarea class="form-control my-2" name="notes">{{ post['notes'] }}</textarea>
+
+  <label class="mt-2"><strong>Current Image:</strong></label><br>
+  {% if post['image'] %}
+    <img src="{{ post['image'] }}" width="250" class="mb-2"><br>
+  {% else %}
+    <p>No image uploaded.</p>
+  {% endif %}
+
+  <input type="file" class="form-control my-2" name="image">
+
+  <button class="btn btn-primary mt-2">💾 Save Changes</button>
+
+</form>
+
+{% endblock %}

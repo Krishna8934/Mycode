@@ -338,6 +338,65 @@ def delete_post(post_id):
     flash("Post deleted.", "info")
     return redirect(url_for('index'))
 
+@app.route('/edit/<int:post_id>', methods=['GET', 'POST'])
+def edit_post(post_id):
+    if 'user_id' not in session:
+        flash("Please login first.", "warning")
+        return redirect(url_for('login'))
+
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if using_postgres() else conn.cursor()
+
+    # Fetch the post
+    query = "SELECT * FROM posts WHERE id = %s" if using_postgres() else "SELECT * FROM posts WHERE id = ?"
+    cur.execute(query, (post_id,))
+    post = cur.fetchone()
+
+    if not post:
+        flash("Post not found.", "danger")
+        return redirect(url_for('index'))
+
+    # authorization check
+    if post['user_id'] != session['user_id']:
+        flash("Not authorized to edit this post.", "danger")
+        return redirect(url_for('index'))
+
+    # ------- POST request (Save edits) -------
+    if request.method == 'POST':
+        problem_no = request.form['problem_no']
+        title = request.form['title']
+        code = request.form['code']
+        notes = request.form['notes']
+
+        # Image update
+        file = request.files['image']
+        image_url = post['image']  # keep same if not replaced
+
+        if file and file.filename:
+            folder_name = "prod_uploads" if using_postgres() else "local_uploads"
+            upload_result = cloudinary.uploader.upload(file, folder=folder_name)
+            image_url = upload_result.get("secure_url")
+
+        update_query = """
+            UPDATE posts 
+            SET problem_no=%s, title=%s, code=%s, notes=%s, image=%s 
+            WHERE id=%s
+        """ if using_postgres() else """
+            UPDATE posts 
+            SET problem_no=?, title=?, code=?, notes=?, image=? 
+            WHERE id=?
+        """
+
+        cur.execute(update_query, (problem_no, title, code, notes, image_url, post_id))
+        conn.commit()
+
+        flash("Post updated successfully!", "success")
+        return redirect(url_for('post', post_id=post_id))
+
+    # ------- GET request (Open form) -------
+    return render_template('edit.html', post=post)
+
+
 
 
 # ---------------- MAIN ----------------
