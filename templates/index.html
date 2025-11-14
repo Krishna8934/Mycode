@@ -1,16 +1,15 @@
 {% extends 'base.html' %}
 {% block content %}
+
 <h3>All Solutions</h3>
 
-<!-- 🔍 Search Bar -->
 <form method="get" action="{{ url_for('index') }}" class="mb-3 d-flex">
   <input type="text" name="q" class="form-control me-2" 
-         placeholder="Search by username, title, problem no, or notes..."
+         placeholder="Search..."
          value="{{ request.args.get('q', '') }}">
   <button class="btn btn-primary" type="submit">Search</button>
 </form>
 
-<!-- 🔽 Results Section -->
 <ul class="list-group">
   {% if posts %}
     {% for p in posts %}
@@ -22,7 +21,8 @@
       </li>
     {% endfor %}
   {% else %}
-    <p class="text-muted">No posts found matching your search.</p>
+    <p class="text-muted">No posts found.</p>
   {% endif %}
 </ul>
+
 {% endblock %}

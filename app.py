@@ -1,5 +1,10 @@
-from dotenv import load_dotenv
-load_dotenv()
+# ---------------- DOTENV (SAFE IMPORT) ----------------
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass  # On Render, python-dotenv may not exist
+
 
 import os
 import sqlite3
@@ -12,16 +17,24 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
+
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
 
 
 # ---------------- CLOUDINARY CONFIG ----------------
-cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET")
-)
+cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
+api_key = os.getenv("CLOUDINARY_API_KEY")
+api_secret = os.getenv("CLOUDINARY_API_SECRET")
+
+if not cloud_name or not api_key or not api_secret:
+    print("⚠️ Cloudinary ENV missing! Check Render Environment Vars.")
+else:
+    cloudinary.config(
+        cloud_name=cloud_name.strip(),
+        api_key=api_key.strip(),
+        api_secret=api_secret.strip()
+    )
 
 
 # ---------------- DATABASE SETUP ----------------
@@ -155,9 +168,10 @@ def index():
     return render_template('index.html', posts=posts)
 
 
+
 @app.route('/register', methods=['GET','POST'])
 def register():
-    if request.method == 'POST':   # FIXED
+    if request.method == 'POST':
         username = request.form['username']
         email = request.form['email']
         password = generate_password_hash(request.form['password'])
@@ -167,16 +181,15 @@ def register():
             cur = conn.cursor()
 
             query = "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)" \
-                    if using_postgres() else \
-                    "INSERT INTO users (username, email, password) VALUES (?, ?, ?)"
+                if using_postgres() else \
+                "INSERT INTO users (username, email, password) VALUES (?, ?, ?)"
 
             cur.execute(query, (username, email, password))
             conn.commit()
             flash("Account created! Please login.", "success")
 
-        except Exception as e:
-            print(e)
-            flash("Email already exists or error occurred.", "danger")
+        except:
+            flash("Email already exists.", "danger")
 
         return redirect(url_for('login'))
 
@@ -201,7 +214,7 @@ def login():
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
-            flash("Logged in successfully!", "success")
+            flash("Logged in!", "success")
             return redirect(url_for('index'))
 
         flash("Invalid credentials", "danger")
@@ -209,17 +222,19 @@ def login():
     return render_template('login.html')
 
 
+
 @app.route('/logout')
 def logout():
     session.clear()
-    flash("Logged out successfully.", "info")
+    flash("Logged out.", "info")
     return redirect(url_for('index'))
+
 
 
 @app.route('/upload', methods=['GET','POST'])
 def upload():
     if 'user_id' not in session:
-        flash("Please login first.", "warning")
+        flash("Login first.", "warning")
         return redirect(url_for('login'))
 
     if request.method == 'POST':
@@ -231,7 +246,6 @@ def upload():
 
         image_url = None
 
-        # ----------- CLOUDINARY UPLOAD WITH LOCAL/PROD SEPARATION ------------
         if file and file.filename:
             folder_name = "prod_uploads" if using_postgres() else "local_uploads"
 
@@ -258,10 +272,11 @@ def upload():
         cur.execute(query, (session['user_id'], problem_no, title, code, image_url, notes, date))
         conn.commit()
 
-        flash("Post uploaded successfully!", "success")
+        flash("Post uploaded!", "success")
         return redirect(url_for('index'))
 
     return render_template('upload.html')
+
 
 
 @app.route('/p/<int:post_id>')
@@ -283,16 +298,17 @@ def post(post_id):
     post = cur.fetchone()
 
     if not post:
-        flash("Post not found", "danger")
+        flash("Post not found.", "danger")
         return redirect(url_for('index'))
 
     return render_template('post.html', post=post)
 
 
+
 @app.route('/delete/<int:post_id>', methods=['POST'])
 def delete_post(post_id):
     if 'user_id' not in session:
-        flash("Please login first.", "warning")
+        flash("Login first.", "danger")
         return redirect(url_for('login'))
 
     conn = get_db()
@@ -307,7 +323,7 @@ def delete_post(post_id):
         return redirect(url_for('index'))
 
     if post['user_id'] != session['user_id']:
-        flash("Not authorized.", "danger")
+        flash("Unauthorized.", "danger")
         return redirect(url_for('index'))
 
     delete_query = "DELETE FROM posts WHERE id = %s" if using_postgres() else "DELETE FROM posts WHERE id = ?"
@@ -318,6 +334,7 @@ def delete_post(post_id):
     return redirect(url_for('index'))
 
 
-# --------------- MAIN ----------------
+
+# ---------------- MAIN ----------------
 if __name__ == '__main__':
     app.run(debug=True)
